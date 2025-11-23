@@ -1,0 +1,7 @@
+{
+  "name": "Aether Studio",
+  "description": "A web-based VS Code fork with GitHub integration, collaborative-style editor interface, simulated terminal, and Gemini 2.5 powered coding assistant.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
