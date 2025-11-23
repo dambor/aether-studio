@@ -77,6 +77,21 @@ function App() {
         if (shellService) shellService.updateFileTree(fileTree);
     }, [fileTree, activeFile, activeFileContent, shellService]);
 
+    // --- Helper to sanitize tree for sync (remove non-cloneable handles) ---
+    const cleanTreeForSync = (nodes: FileNode[]): FileNode[] => {
+        return nodes.map(node => {
+            // Destructure to separate handle from the rest of the properties
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { handle, ...safeNode } = node;
+            
+            const cleaned: FileNode = { ...safeNode };
+            if (node.children) {
+                cleaned.children = cleanTreeForSync(node.children);
+            }
+            return cleaned;
+        });
+    };
+
     useEffect(() => {
         // Initialize User Identity
         const user = generateUser();
@@ -142,9 +157,11 @@ function App() {
             if (event.type === 'JOIN_REQUEST') {
                 console.log(`User ${event.user.name} requesting sync. Sending state...`);
                 // We broadcast our entire file tree to the new user
+                // MUST CLEAN handles first
+                const safeTree = cleanTreeForSync(fileTreeRef.current);
                 collaborationService.broadcast({ 
                     type: 'SYNC_INIT', 
-                    fileTree: fileTreeRef.current 
+                    fileTree: safeTree 
                 });
             }
 
@@ -502,7 +519,9 @@ function App() {
                 const newTree = upsertPathInTree(prev, targetPath.split('/'), targetPath, content);
                 
                 // 2. Broadcast Structural Change to Peers immediately
-                collaborationService.broadcast({ type: 'SYNC_FILES', fileTree: newTree });
+                // MUST SANITIZE first
+                const safeTree = cleanTreeForSync(newTree);
+                collaborationService.broadcast({ type: 'SYNC_FILES', fileTree: safeTree });
                 return newTree;
             });
 
