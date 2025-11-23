@@ -4,13 +4,93 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aether Studio - Cloud IDE</title>
+    
+    <!-- CRITICAL: Polyfills MUST load before any external libraries -->
+    <script>
+        // 1. Global Polyfill
+        if (typeof global === 'undefined') {
+            window.global = window;
+        }
+        if (typeof globalThis === 'undefined') {
+            window.globalThis = window;
+        }
+        
+        // 2. Process Polyfill
+        if (typeof process === 'undefined') {
+            window.process = {
+                env: { NODE_ENV: 'development' },
+                version: 'v16.0.0',
+                versions: { node: '16.0.0' },
+                platform: 'browser',
+                browser: true,
+                nextTick: function(cb) { setTimeout(cb, 0); },
+                cwd: function() { return '/'; }
+            };
+        }
+
+        // 3. Buffer Polyfill (Minimal)
+        if (typeof Buffer === 'undefined') {
+            window.Buffer = {
+                isBuffer: function() { return false; },
+                from: function(data) { 
+                    if (typeof TextEncoder !== 'undefined') {
+                        return new TextEncoder().encode(data);
+                    }
+                    return new Uint8Array([]);
+                },
+                alloc: function(size) { return new Uint8Array(size); },
+                concat: function(arr) { 
+                    // Basic concat for simple use cases
+                    let length = 0;
+                    arr.forEach(item => length += item.length);
+                    let result = new Uint8Array(length);
+                    let offset = 0;
+                    arr.forEach(item => {
+                        result.set(item, offset);
+                        offset += item.length;
+                    });
+                    return result;
+                }
+            };
+        }
+
+        // REMOVED: CommonJS/Module Polyfills (exports, module, require)
+        // These caused conflicts with Monaco Editor's AMD loader.
+
+        // 5. Global Error Handlers for Initialization
+        window.onerror = function(msg, url, line, col, error) {
+            console.error("Global Error Caught:", msg, error);
+            // Don't overwrite root if it's just a ResizeObserver loop error or similar warnings
+            if (msg.includes('ResizeObserver')) return;
+
+            const root = document.getElementById('root');
+            if (root) {
+                // Only overwrite if root is empty (i.e. app hasn't started)
+                if (root.innerHTML.trim() === '') {
+                     root.innerHTML = `
+                        <div style="color:#ff5555; background:#1e1e1e; height:100vh; padding:20px; font-family:monospace; white-space:pre-wrap;">
+                            <h2 style="margin-top:0">Startup Error</h2>
+                            <div style="background:#2d2d2d; padding:10px; border-radius:4px;">${msg}</div>
+                            <p style="opacity:0.7; font-size:12px; margin-top:10px;">${url}:${line}:${col}</p>
+                            <p>Check console for details.</p>
+                        </div>
+                    `;
+                }
+            }
+        };
+
+        window.addEventListener('unhandledrejection', function(event) {
+            console.error("Unhandled Rejection:", event.reason);
+        });
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Load JS-YAML Globally to avoid 'npm install' requirement in local dev -->
+    <!-- Load JS-YAML Globally -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
     
-    <!-- Xterm.js for Full Terminal Implementation -->
+    <!-- Xterm.js -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>

@@ -52,6 +52,11 @@ function App() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [aetherConfig, setAetherConfig] = useState<AetherConfig | null>(null);
     
+    // Session State
+    const [sessionId, setSessionId] = useState<string>('');
+    const [isGuest, setIsGuest] = useState(false);
+    const [isConnecting, setIsConnecting] = useState(false);
+    
     // Shell Service State
     const [shellService, setShellService] = useState<ShellService | null>(null);
 
@@ -77,19 +82,81 @@ function App() {
         const user = generateUser();
         setCurrentUser(user);
 
+        // Session Management
+        const sid = collaborationService.getSessionId();
+        setSessionId(sid);
+        
+        // Update URL without reload to reflect session
+        try {
+            const url = new URL(window.location.href);
+            // Only attempt to modify history if we are in a standard environment
+            // Blob/Sandboxed environments often block this
+            if (!url.searchParams.has('session')) {
+                try {
+                    url.searchParams.set('session', sid);
+                    window.history.replaceState({}, '', url.toString());
+                } catch(e) {
+                     console.warn("Unable to update URL state (sandbox restriction)");
+                }
+            } else {
+                // If URL has session, check if we are Host or Guest
+                if (!collaborationService.isHost()) {
+                    setIsGuest(true);
+                    setIsConnecting(true); // Block UI until we receive SYNC_INIT
+                } else {
+                    console.log("Welcome back, Host.");
+                    setIsGuest(false);
+                    setIsConnecting(false);
+                }
+            }
+        } catch (e) {
+            console.warn("Could not access URL state", e);
+        }
+
         // Initialize Shell
         const shell = new ShellService(fileTree, setFileTree);
         setShellService(shell);
         shellRef.current = shell;
         
         // Auto-load Kubeconfig if available in localStorage
-        const loaded = initializeKubeConfig();
-        if (loaded && shellRef.current) {
-            shellRef.current.execute('echo "Welcome back! Kubeconfig loaded from storage."');
-        }
+        // We wrap this in a timeout to ensure js-yaml CDN is loaded
+        const initKube = () => {
+            try {
+                const loaded = initializeKubeConfig();
+                if (loaded && shellRef.current) {
+                    shellRef.current.execute('echo "Welcome back! Kubeconfig loaded from storage."');
+                } else {
+                    // Retry once if CDN was slow
+                     setTimeout(() => initializeKubeConfig(), 1000);
+                }
+            } catch (e) {
+                console.warn("Kubeconfig init failed", e);
+            }
+        };
+        setTimeout(initKube, 500);
         
         // Listen for file sync events from other collaborators (or Agent)
         const unsubscribe = collaborationService.subscribe((event) => {
+            
+            // --- HOST LOGIC: A new user joined, send them the state ---
+            if (event.type === 'JOIN_REQUEST') {
+                console.log(`User ${event.user.name} requesting sync. Sending state...`);
+                // We broadcast our entire file tree to the new user
+                collaborationService.broadcast({ 
+                    type: 'SYNC_INIT', 
+                    fileTree: fileTreeRef.current 
+                });
+            }
+
+            // --- GUEST LOGIC: Receive initial state from Host ---
+            if (event.type === 'SYNC_INIT') {
+                console.log("Received Initial State from Host.");
+                setFileTree(event.fileTree);
+                setIsConnecting(false); // Unblock UI
+                if (shellRef.current) shellRef.current.updateFileTree(event.fileTree);
+            }
+
+            // --- UPDATE LOGIC: Receive updates from Agent or Peers ---
             if (event.type === 'SYNC_FILES') {
                 console.log("Received file tree update from peer.");
                 
@@ -139,7 +206,6 @@ function App() {
     }, []);
 
     // --- AUTO-DETECT .kube/config ---
-    // If the user opens a local folder that contains .kube/config, auto-load it.
     useEffect(() => {
         const checkForKubeConfig = async () => {
             const findConfig = async (nodes: FileNode[]) => {
@@ -147,7 +213,6 @@ function App() {
                     if (node.name === '.kube' && node.type === FileType.DIRECTORY && node.children) {
                         const configFile = node.children.find(c => c.name === 'config');
                         if (configFile) {
-                            // Found it! Read it.
                             console.log("Auto-detected .kube/config!");
                             let content = "";
                             if (configFile.handle) {
@@ -187,7 +252,7 @@ function App() {
         });
     };
 
-    // Robust Helper to Create or Update nodes in the tree (handles directory creation)
+    // Robust Helper to Create or Update nodes in the tree
     const upsertPathInTree = (nodes: FileNode[], pathParts: string[], fullPath: string, content: string): FileNode[] => {
         const [currentPart, ...rest] = pathParts;
         
@@ -327,9 +392,13 @@ function App() {
     };
 
     const handleInvite = () => {
-        const url = window.location.href;
-        navigator.clipboard.writeText(url);
-        alert("Session Link Copied! \n\nShare this URL to invite a friend. Open it in a new tab to test multiplayer.");
+        try {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url);
+            alert(`Session Invite Link Copied!\n\nID: ${sessionId}\n\nSend this to a friend. When they open it, they will join THIS session and sync your files.`);
+        } catch (e) {
+            alert(`Session ID: ${sessionId}\n\n(Could not copy URL automatically due to sandbox restrictions)`);
+        }
     };
 
     const handleStageFile = (path: string) => {
@@ -483,6 +552,28 @@ function App() {
              return executeMcpTool(server, cmd, args);
         }
     };
+
+    // --- RENDER CONNECTION STATE ---
+    if (isGuest && isConnecting) {
+        return (
+             <div className="h-screen w-screen bg-ide-bg text-white flex flex-col items-center justify-center gap-4">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-ide-accent"></div>
+                <div className="text-xl font-bold">Joining Session...</div>
+                <div className="text-sm text-gray-500">Waiting for host to sync project files</div>
+                <div className="text-xs text-gray-700 font-mono mt-2">ID: {sessionId}</div>
+                <button 
+                    onClick={() => {
+                        collaborationService.claimHost();
+                        setIsGuest(false);
+                        setIsConnecting(false);
+                    }}
+                    className="mt-4 px-4 py-2 bg-ide-activity border border-gray-600 rounded text-sm hover:bg-gray-700"
+                >
+                    Stuck? Start as Host
+                </button>
+            </div>
+        );
+    }
 
     if (!currentUser) return <div className="h-screen w-screen bg-ide-bg text-white flex items-center justify-center">Initializing Aether Studio...</div>;
 

@@ -45,7 +45,9 @@ export const AI_AGENT_COLLABORATOR: Collaborator = {
 };
 
 export type CollabEvent = 
-    | { type: 'JOIN'; user: Collaborator }
+    | { type: 'JOIN'; user: Collaborator } // Broadcast presence
+    | { type: 'JOIN_REQUEST'; user: Collaborator } // Guest asking for state
+    | { type: 'SYNC_INIT'; fileTree: FileNode[] } // Host sending full state
     | { type: 'LEAVE'; userId: string }
     | { type: 'UPDATE'; user: Collaborator }
     | { type: 'HEARTBEAT'; userId: string }

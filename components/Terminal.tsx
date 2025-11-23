@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { ShellService } from '../services/shellService';
 
@@ -18,90 +19,123 @@ const XtermTerminal: React.FC<TerminalProps> = ({ shell }) => {
     useEffect(() => {
         if (!terminalRef.current) return;
 
-        // Initialize Xterm
-        const term = new Terminal({
-            fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 14,
-            cursorBlink: true,
-            theme: {
-                background: '#181818',
-                foreground: '#cccccc',
-                cursor: '#ffffff',
-                selection: '#5da5d533',
-                black: '#181818',
-                blue: '#4080e0',
-                cyan: '#40e0d0',
-                green: '#40e040',
-                magenta: '#e040e0',
-                red: '#e04040',
-                white: '#ffffff',
-                yellow: '#e0e040'
-            }
-        });
-
-        const fit = new FitAddon.FitAddon();
-        term.loadAddon(fit);
-        term.open(terminalRef.current);
-        fit.fit();
-        
-        xtermInstance.current = term;
-        fitAddon.current = fit;
-
-        // Banner
-        term.writeln('\u001b[1;36mAether Studio Terminal [Linux Emulation]\u001b[0m');
-        term.writeln('Powered by Xterm.js & Virtual File System');
-        
-        // Prompt
-        if (shell) {
-            shell.setWriter((text) => term.write(text));
-            term.write(shell.getPrompt());
+        // Safety check: Ensure Xterm.js is loaded from CDN
+        if (typeof Terminal === 'undefined' || typeof FitAddon === 'undefined') {
+            console.warn("Xterm.js not loaded yet.");
+            terminalRef.current.innerHTML = '<div class="p-4 text-xs text-gray-500 font-mono">Terminal loading... (Waiting for CDN)</div>';
+            return;
         }
 
-        // Input Handling
-        term.onData((data: string) => {
-            const charCode = data.charCodeAt(0);
+        try {
+            // Initialize Xterm
+            const term = new Terminal({
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 14,
+                cursorBlink: true,
+                theme: {
+                    background: '#181818',
+                    foreground: '#cccccc',
+                    cursor: '#ffffff',
+                    selection: '#5da5d533',
+                    black: '#181818',
+                    blue: '#4080e0',
+                    cyan: '#40e0d0',
+                    green: '#40e040',
+                    magenta: '#e040e0',
+                    red: '#e04040',
+                    white: '#ffffff',
+                    yellow: '#e0e040'
+                }
+            });
 
-            // Enter
-            if (charCode === 13) {
-                const command = commandBuffer.current;
-                commandBuffer.current = '';
-                
-                if (command === 'clear') {
-                    term.clear();
-                    if (shell) term.write(shell.getPrompt());
-                    return;
+            // Robust FitAddon Instantiation
+            // Some CDNs export it as FitAddon.FitAddon, others as just FitAddon
+            let fit;
+            try {
+                fit = new FitAddon.FitAddon();
+            } catch (e) {
+                try {
+                    fit = new FitAddon();
+                } catch (e2) {
+                    console.error("Failed to instantiate FitAddon:", e2);
                 }
-
-                if (shell) {
-                    shell.execute(command).then(() => {
-                        term.write(shell.getPrompt());
-                    });
-                }
-            } 
-            // Backspace
-            else if (charCode === 127) {
-                if (commandBuffer.current.length > 0) {
-                    commandBuffer.current = commandBuffer.current.slice(0, -1);
-                    term.write('\b \b');
-                }
-            } 
-            // Normal Characters
-            else if (charCode >= 32) {
-                commandBuffer.current += data;
-                term.write(data);
             }
-        });
 
-        // Resize observer
-        const resizeObserver = new ResizeObserver(() => {
-            try { fit.fit(); } catch(e) {}
-        });
-        resizeObserver.observe(terminalRef.current);
+            if (fit) {
+                term.loadAddon(fit);
+            }
+            
+            term.open(terminalRef.current);
+            if (fit) {
+                try { fit.fit(); } catch(e) { console.warn("Fit error:", e); }
+            }
+            
+            xtermInstance.current = term;
+            fitAddon.current = fit;
 
-        return () => {
-            term.dispose();
-            resizeObserver.disconnect();
-        };
+            // Banner
+            term.writeln('\u001b[1;36mAether Studio Terminal [Linux Emulation]\u001b[0m');
+            term.writeln('Powered by Xterm.js & Virtual File System');
+            
+            // Prompt
+            if (shell) {
+                shell.setWriter((text) => term.write(text));
+                term.write(shell.getPrompt());
+            }
+
+            // Input Handling
+            term.onData((data: string) => {
+                const charCode = data.charCodeAt(0);
+
+                // Enter
+                if (charCode === 13) {
+                    const command = commandBuffer.current;
+                    commandBuffer.current = '';
+                    
+                    if (command === 'clear') {
+                        term.clear();
+                        if (shell) term.write(shell.getPrompt());
+                        return;
+                    }
+
+                    if (shell) {
+                        shell.execute(command).then(() => {
+                            term.write(shell.getPrompt());
+                        });
+                    }
+                } 
+                // Backspace
+                else if (charCode === 127) {
+                    if (commandBuffer.current.length > 0) {
+                        commandBuffer.current = commandBuffer.current.slice(0, -1);
+                        term.write('\b \b');
+                    }
+                } 
+                // Normal Characters
+                else if (charCode >= 32) {
+                    commandBuffer.current += data;
+                    term.write(data);
+                }
+            });
+
+            // Resize observer
+            const resizeObserver = new ResizeObserver(() => {
+                try { 
+                    if (fitAddon.current) fitAddon.current.fit(); 
+                } catch(e) {}
+            });
+            resizeObserver.observe(terminalRef.current);
+
+            return () => {
+                term.dispose();
+                resizeObserver.disconnect();
+            };
+        } catch (error) {
+            console.error("Terminal initialization failed:", error);
+            if (terminalRef.current) {
+                terminalRef.current.innerHTML = `<div class="p-4 text-xs text-red-500 font-mono">Terminal Error: ${error}</div>`;
+            }
+        }
     }, []);
 
     // Sync shell instance if it changes (unlikely)

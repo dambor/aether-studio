@@ -9,22 +9,35 @@ let activeContext: K8sContext | null = null;
 
 export const initializeKubeConfig = (): boolean => {
     try {
+        // Safety check for CDN load
+        if (typeof jsyaml === 'undefined') {
+            // Not an error, just means we are too early. 
+            // The App component will retry or waiting for user action.
+            return false;
+        }
+
         const saved = localStorage.getItem('kube_config_yaml');
-        if (saved && typeof jsyaml !== 'undefined') {
-            const config = jsyaml.load(saved) as KubeConfig;
-            activeConfig = config;
-            
-            // Set default context
-            const currentCtxName = config['current-context'];
-            const currentCtx = config.contexts.find(c => c.name === currentCtxName);
-            if (currentCtx) {
-                setContext(currentCtx.name);
+        if (saved) {
+            try {
+                const config = jsyaml.load(saved) as KubeConfig;
+                activeConfig = config;
+                
+                // Set default context
+                const currentCtxName = config['current-context'];
+                const currentCtx = config.contexts.find(c => c.name === currentCtxName);
+                if (currentCtx) {
+                    setContext(currentCtx.name);
+                }
+                console.log("Kubeconfig restored from storage.");
+                return true;
+            } catch (parseErr) {
+                console.error("Failed to parse saved kubeconfig", parseErr);
+                localStorage.removeItem('kube_config_yaml'); // Clear bad config
+                return false;
             }
-            console.log("Kubeconfig restored from storage.");
-            return true;
         }
     } catch (e) {
-        console.warn("Failed to restore kubeconfig", e);
+        console.warn("Failed to restore kubeconfig (likely localStorage disabled)", e);
     }
     return false;
 };
@@ -45,14 +58,18 @@ export const getKubeConfigStatus = () => {
 export const loadKubeConfig = (yamlContent: string): KubeConfig => {
     try {
         if (typeof jsyaml === 'undefined') {
-            throw new Error("js-yaml library not loaded");
+            throw new Error("js-yaml library not loaded. Please check internet connection.");
         }
         
         const config = jsyaml.load(yamlContent) as KubeConfig;
         activeConfig = config;
         
         // Persist
-        localStorage.setItem('kube_config_yaml', yamlContent);
+        try {
+            localStorage.setItem('kube_config_yaml', yamlContent);
+        } catch(e) {
+            console.warn("Could not save to localStorage", e);
+        }
         
         // Set default context
         const currentCtxName = config['current-context'];

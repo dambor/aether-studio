@@ -11,6 +11,7 @@ const ignoredErrors = [
 window.addEventListener('error', (e) => {
     if (ignoredErrors.includes(e.message)) {
         e.stopImmediatePropagation();
+        return;
     }
 });
 
@@ -19,9 +20,19 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
-const root = ReactDOM.createRoot(rootElement);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+try {
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(
+        <React.StrictMode>
+        <App />
+        </React.StrictMode>
+    );
+} catch (e: any) {
+    console.error("Root Render Error:", e);
+    rootElement.innerHTML = `
+        <div style="color:red; padding: 20px; background: #1e1e1e; height: 100vh;">
+            <h1>Application Crashed</h1>
+            <pre>${e.message || e}</pre>
+        </div>
+    `;
+}
